@@ -10,6 +10,11 @@ const state = {
 };
 
 const shortcuts = [1, 2, 5, 10, 20, 50];
+const tapFeedback = () => {
+  if (navigator.vibrate) {
+    navigator.vibrate(10);
+  }
+};
 
 const toast = (message) => {
   const node = document.createElement('div');
@@ -18,6 +23,90 @@ const toast = (message) => {
   document.body.appendChild(node);
   setTimeout(() => node.remove(), 2200);
 };
+
+const closeSheet = () => {
+  document.body.classList.remove('sheet-open');
+  document.querySelector('.sheet-mask')?.remove();
+};
+
+const showSheet = ({
+  title,
+  description = '',
+  fields = [],
+  confirmText = '确定',
+  cancelText = '取消',
+  danger = false
+}) => new Promise((resolve) => {
+  closeSheet();
+
+  const mask = document.createElement('div');
+  mask.className = 'sheet-mask';
+  mask.innerHTML = `
+    <div class="sheet-card glass-card" role="dialog" aria-modal="true" aria-label="${title}">
+      <div class="sheet-handle"></div>
+      <div class="sheet-title">${title}</div>
+      ${description ? `<p class="sheet-desc">${description}</p>` : ''}
+      <form class="sheet-form">
+        <div class="sheet-fields"></div>
+        <div class="sheet-actions">
+          <button type="button" class="btn-secondary sheet-cancel">${cancelText}</button>
+          <button type="submit" class="${danger ? 'btn-danger' : 'btn'}">${confirmText}</button>
+        </div>
+      </form>
+    </div>
+  `;
+
+  const form = mask.querySelector('.sheet-form');
+  const fieldsNode = mask.querySelector('.sheet-fields');
+  const cleanup = (payload) => {
+    closeSheet();
+    resolve(payload);
+  };
+
+  fields.forEach((field) => {
+    const wrap = document.createElement('label');
+    wrap.className = 'sheet-field';
+    wrap.innerHTML = field.label ? `<span>${field.label}</span>` : '';
+
+    const input = document.createElement(field.multiline ? 'textarea' : 'input');
+    input.className = field.multiline ? 'textarea' : 'field';
+    input.name = field.name;
+    input.placeholder = field.placeholder || '';
+    input.value = field.value || '';
+    input.autocomplete = field.autocomplete || 'off';
+    input.inputMode = field.inputMode || '';
+    input.maxLength = field.maxLength || 999;
+    input.spellcheck = false;
+
+    if (!field.multiline) {
+      input.type = field.type || 'text';
+    }
+
+    wrap.appendChild(input);
+    fieldsNode.appendChild(wrap);
+  });
+
+  mask.addEventListener('click', (event) => {
+    if (event.target === mask) {
+      cleanup(null);
+    }
+  });
+
+  mask.querySelector('.sheet-cancel').addEventListener('click', () => cleanup(null));
+
+  form.addEventListener('submit', (event) => {
+    event.preventDefault();
+    const payload = Object.fromEntries(new FormData(form).entries());
+    cleanup(payload);
+  });
+
+  document.body.appendChild(mask);
+  document.body.classList.add('sheet-open');
+  requestAnimationFrame(() => mask.classList.add('visible'));
+  mask.querySelector('.field, .textarea')?.focus();
+});
+
+const confirmSheet = async (options) => Boolean(await showSheet({ ...options, fields: [] }));
 
 const savePendingRoute = (hash) => {
   localStorage.setItem('pending_route', hash || '#/dashboard');
@@ -95,28 +184,43 @@ const renderAuth = () => {
     <div class="auth-wrap">
       <div class="auth-layout">
         <section class="glass-card hero">
-          <div class="hero-badge">URL 直达实时算分</div>
-          <h1 class="title">朋友打开链接就能进房，实时同步所有分数变化</h1>
-          <p class="desc">这版已经切成纯 Web：手机号注册登录、MongoDB 存历史、Socket.io 做房间同步。部署后就是一个正常网站，不依赖小程序。</p>
-          <div class="grid-3" style="margin-top:20px">
-            <div class="metric"><div class="metric-label">访问方式</div><div class="metric-value">浏览器</div></div>
-            <div class="metric"><div class="metric-label">同步方式</div><div class="metric-value">实时</div></div>
-            <div class="metric"><div class="metric-label">数据</div><div class="metric-value">真历史</div></div>
+          <div class="hero-badge">实时在线记分</div>
+          <div class="hero-kicker">Simple · Modern · Live</div>
+          <h1 class="title">打牌时顺手记分，牌局里所有变化都会实时同步</h1>
+          <p class="desc">这是面向手机竖屏的在线记分 H5：手机号登录、房间邀请、实时刷新、历史沉淀，打开链接就能直接开局。</p>
+          <div class="grid-3 hero-metrics" style="margin-top:20px">
+            <div class="metric"><div class="metric-label">打开方式</div><div class="metric-value">H5</div></div>
+            <div class="metric"><div class="metric-label">同步状态</div><div class="metric-value">LIVE</div></div>
+            <div class="metric"><div class="metric-label">数据记录</div><div class="metric-value">实时</div></div>
+          </div>
+          <div class="hero-preview hero-preview-elevated">
+            <div class="hero-preview-row">
+              <span>当前牌局</span>
+              <strong>ROOM 6208</strong>
+            </div>
+            <div class="hero-preview-score">
+              <div><span>当前领先</span><strong>+26</strong></div>
+              <div><span>在线人数</span><strong>4</strong></div>
+            </div>
+            <div class="hero-preview-footer">
+              <span class="status-dot"></span>
+              <span>房间在线同步中</span>
+            </div>
           </div>
         </section>
         <section class="glass-card panel">
           <div class="panel-title">${state.loginMode === 'login' ? '登录继续牌局' : state.loginMode === 'register' ? '注册新账号' : '找回密码'}</div>
-          <p class="desc">${state.loginMode === 'forgot' ? '先用手机号和注册昵称做基础校验，后面需要的话再接短信。' : '登录后会自动回到你之前要进入的页面。'}</p>
+          <p class="desc">${state.loginMode === 'forgot' ? '先用手机号和注册昵称完成校验，再设置新密码。' : '登录后会自动回到你刚才准备进入的页面。'}</p>
           <div class="tabs">
             <button class="tab ${state.loginMode === 'login' ? 'active' : ''}" data-mode="login">登录</button>
             <button class="tab ${state.loginMode === 'register' ? 'active' : ''}" data-mode="register">注册</button>
             <button class="tab ${state.loginMode === 'forgot' ? 'active' : ''}" data-mode="forgot">找回密码</button>
           </div>
           <form id="auth-form" class="form-grid">
-            <input class="field" name="phone" placeholder="请输入手机号" maxlength="11" />
-            ${state.loginMode !== 'forgot' ? '<input class="field" type="password" name="password" placeholder="请输入密码" />' : ''}
-            ${state.loginMode === 'register' ? '<input class="field" type="password" name="confirmPassword" placeholder="请确认密码" /><input class="field" name="nickName" placeholder="请输入昵称" />' : ''}
-            ${state.loginMode === 'forgot' ? '<input class="field" name="nickName" placeholder="请输入注册昵称" /><input class="field" type="password" name="newPassword" placeholder="请输入新密码" /><input class="field" type="password" name="confirmPassword" placeholder="请确认新密码" />' : ''}
+            <input class="field" type="tel" inputmode="numeric" autocomplete="tel" name="phone" placeholder="请输入手机号" maxlength="11" />
+            ${state.loginMode !== 'forgot' ? '<input class="field" type="password" autocomplete="current-password" name="password" placeholder="请输入密码" />' : ''}
+            ${state.loginMode === 'register' ? '<input class="field" type="password" autocomplete="new-password" name="confirmPassword" placeholder="请确认密码" /><input class="field" autocomplete="nickname" name="nickName" placeholder="请输入昵称" />' : ''}
+            ${state.loginMode === 'forgot' ? '<input class="field" autocomplete="nickname" name="nickName" placeholder="请输入注册昵称" /><input class="field" type="password" autocomplete="new-password" name="newPassword" placeholder="请输入新密码" /><input class="field" type="password" autocomplete="new-password" name="confirmPassword" placeholder="请确认新密码" />' : ''}
             <button class="btn" type="submit">${state.loginMode === 'login' ? '立即登录' : state.loginMode === 'register' ? '完成注册' : '重置密码'}</button>
           </form>
         </section>
@@ -191,7 +295,7 @@ const renderDashboard = async () => {
             <p class="desc" style="margin:8px 0 0">${profile.phone || '--'}</p>
           </div>
         </div>
-        <div class="inline-actions">
+        <div class="inline-actions action-grid">
           <button class="btn-secondary" id="edit-name">修改昵称</button>
           <button class="btn-secondary" id="change-password">修改密码</button>
           <button class="btn-secondary" id="go-history">历史战绩</button>
@@ -206,14 +310,19 @@ const renderDashboard = async () => {
       </section>
 
       <section class="glass-card panel">
-        <div class="panel-title">开局工作台</div>
-        <p class="desc">创建房间后可以复制房间链接发给别人，也可以直接输入房间号或粘贴链接加入。</p>
+        <div class="section-head">
+          <div>
+            <div class="panel-title">开局工作台</div>
+            <p class="desc">创建房间后可以直接发链接邀请，也可以输入房间号快速加入。</p>
+          </div>
+          <span class="badge">实时在线</span>
+        </div>
         <div class="btn-row" style="margin-top:18px">
           <button class="btn" id="create-room">创建实时房间</button>
         </div>
         <div class="join-box stack">
-          <input id="join-input" class="field" placeholder="输入房间号，或粘贴房间链接" />
-          <div class="btn-row">
+          <input id="join-input" class="field" inputmode="text" autocapitalize="characters" placeholder="输入房间号，或粘贴房间链接" />
+          <div class="btn-row action-grid">
             <button class="btn-secondary" id="join-room">加入房间</button>
             <button class="btn-secondary" id="paste-link">粘贴剪贴板</button>
           </div>
@@ -221,7 +330,10 @@ const renderDashboard = async () => {
       </section>
 
       <section class="glass-card panel">
-        <div class="panel-title">数据总览</div>
+        <div class="section-head">
+          <div class="panel-title">数据总览</div>
+          <span class="subtle">自动累计</span>
+        </div>
         <div class="analytics-grid" style="margin-top:18px">
           <div class="metric"><div class="metric-label">胜场</div><div class="metric-value">${stats.winGames}</div></div>
           <div class="metric"><div class="metric-label">平均得分</div><div class="metric-value">${stats.averageScore}</div></div>
@@ -278,7 +390,22 @@ const renderDashboard = async () => {
   });
 
   app.querySelector('#edit-name').addEventListener('click', async () => {
-    const next = window.prompt('请输入新昵称', profile.nickName);
+    const result = await showSheet({
+      title: '修改昵称',
+      description: '昵称会显示在首页、房间和历史记录里。',
+      confirmText: '保存',
+      fields: [
+        {
+          name: 'nickName',
+          label: '新昵称',
+          value: profile.nickName,
+          placeholder: '请输入新昵称',
+          autocomplete: 'nickname',
+          maxLength: 20
+        }
+      ]
+    });
+    const next = result?.nickName?.trim();
     if (!next) return;
     try {
       await api('/api/user/update', { method: 'POST', body: { nickName: next } });
@@ -290,12 +417,18 @@ const renderDashboard = async () => {
   });
 
   app.querySelector('#change-password').addEventListener('click', async () => {
-    const oldPassword = window.prompt('请输入当前密码');
-    if (!oldPassword) return;
-    const newPassword = window.prompt('请输入新密码');
-    if (!newPassword) return;
-    const confirmPassword = window.prompt('请再次输入新密码');
-    if (!confirmPassword) return;
+    const result = await showSheet({
+      title: '修改密码',
+      description: '为了安全起见，需要先输入当前密码。',
+      confirmText: '确认修改',
+      fields: [
+        { name: 'oldPassword', label: '当前密码', type: 'password', placeholder: '请输入当前密码', autocomplete: 'current-password' },
+        { name: 'newPassword', label: '新密码', type: 'password', placeholder: '请输入新密码', autocomplete: 'new-password' },
+        { name: 'confirmPassword', label: '确认新密码', type: 'password', placeholder: '请再次输入新密码', autocomplete: 'new-password' }
+      ]
+    });
+    if (!result) return;
+    const { oldPassword, newPassword, confirmPassword } = result;
     try {
       await api('/api/auth/change-password', {
         method: 'POST',
@@ -326,7 +459,7 @@ const renderHistory = async () => {
             <div class="panel-title">历史战绩</div>
             <p class="desc">所有已结算对局都会自动沉淀在这里。</p>
           </div>
-          <div class="inline-actions">
+          <div class="inline-actions action-grid">
             <button class="btn-secondary" id="back-dashboard">返回首页</button>
             <button class="btn-danger" id="clear-history">清空历史</button>
           </div>
@@ -338,10 +471,13 @@ const renderHistory = async () => {
         </div>
       </section>
       <section class="glass-card panel">
-        <div class="panel-title">对局列表</div>
+        <div class="section-head">
+          <div class="panel-title">对局列表</div>
+          <span class="subtle">${history.length} 条记录</span>
+        </div>
         ${history.length ? `<div class="history-list">${history.map((item) => `
           <div class="history-item">
-            <div class="between">
+            <div class="between history-head">
               <div>
                 <strong>${item.roomTitle}</strong>
                 <div class="subtle" style="margin-top:8px">${item.time} · 房间 ${item.roomId}</div>
@@ -361,7 +497,13 @@ const renderHistory = async () => {
 
   app.querySelector('#back-dashboard').addEventListener('click', () => navigate('/dashboard'));
   app.querySelector('#clear-history').addEventListener('click', async () => {
-    if (!window.confirm('确认清空当前账号的历史战绩吗？')) return;
+    const confirmed = await confirmSheet({
+      title: '清空历史战绩',
+      description: '这个操作只会清空当前账号的历史记录，执行后无法撤回。',
+      confirmText: '确认清空',
+      danger: true
+    });
+    if (!confirmed) return;
     try {
       await api('/api/history/clear', { method: 'POST', body: {} });
       toast('历史已清空');
@@ -472,17 +614,17 @@ const renderRoom = async () => {
         <div class="between">
           <div>
             <div class="panel-title">${room.title || '实时牌局'}</div>
-            <p class="desc">房间号 ${roomId} · ${room.status === 'active' ? '进行中' : '已结束'}</p>
+            <p class="desc">房间号 ${roomId} · ${room.status === 'active' ? '牌局进行中' : '本局已结束'}</p>
           </div>
-          <div class="inline-actions">
+          <div class="inline-actions room-status-pills">
             <span class="badge">${players.length} 人</span>
-            <span class="badge">${isCreator ? '房主' : '参与中'}</span>
+            <span class="badge">${isCreator ? '房主' : '在线中'}</span>
           </div>
         </div>
         <div class="metric" style="margin-top:18px">
           <div class="metric-label">邀请链接</div>
           <div class="subtle" style="margin-top:10px;word-break:break-all">${shareLink}</div>
-          <div class="btn-row" style="margin-top:14px">
+          <div class="btn-row action-grid" style="margin-top:14px">
             <button class="btn-secondary" id="copy-link">复制链接</button>
             ${isCreator && room.status === 'active' ? '<button class="btn-secondary" id="settle-room">结束对局</button>' : ''}
             ${room.status === 'active' ? '<button class="btn-secondary" id="revoke-score">撤回上一笔</button>' : ''}
@@ -494,8 +636,11 @@ const renderRoom = async () => {
 
       <div class="room-layout">
         <section class="glass-card">
-          <div class="panel-title">玩家总分</div>
-          <p class="desc">点击其他玩家作为记分目标，点自己的卡片可改房间昵称。</p>
+          <div class="section-head">
+            <div class="panel-title">玩家总分</div>
+            <span class="subtle">点选记分目标</span>
+          </div>
+          <p class="desc">点其他玩家给他记分，点自己的卡片可以修改当前房间昵称。</p>
           <div class="player-list">
             ${players.map((player) => `
               <div class="player-card ${targetId === player.userId ? 'active' : ''}" data-player-id="${player.userId}">
@@ -512,19 +657,25 @@ const renderRoom = async () => {
         <section class="stack">
           ${room.status === 'active' ? `
           <section class="glass-card">
-            <div class="panel-title">快捷记分</div>
-            <p class="desc">当前操作者：${state.room.players.find((item) => item.userId === currentUserId)?.name || '我'}，记给：${selectedName}</p>
+            <div class="section-head">
+              <div class="panel-title">快捷记分</div>
+              <span class="subtle">快速加分</span>
+            </div>
+            <p class="desc">当前操作者：${state.room.players.find((item) => item.userId === currentUserId)?.name || '我'}，当前目标：${selectedName}</p>
             <div class="shortcuts">
               ${shortcuts.map((item) => `<button class="shortcut" data-score="${item}">+${item}</button>`).join('')}
             </div>
-            <div class="btn-row" style="margin-top:16px">
-              <input id="custom-score" class="field" placeholder="输入自定义分数" />
+            <div class="btn-row input-action-row" style="margin-top:16px">
+              <input id="custom-score" class="field" type="tel" inputmode="numeric" placeholder="输入自定义分数" />
               <button class="btn" id="custom-submit">记分</button>
             </div>
           </section>` : ''}
 
           <section class="glass-card">
-            <div class="panel-title">记分流水</div>
+            <div class="section-head">
+              <div class="panel-title">记分流水</div>
+              <span class="subtle">${state.room.scoreHistory.length} 笔</span>
+            </div>
             ${state.room.scoreHistory.length ? `
               <div class="timeline-list">
                 ${state.room.scoreHistory.map((item) => {
@@ -542,7 +693,10 @@ const renderRoom = async () => {
           </section>
 
           <section class="glass-card">
-            <div class="panel-title">房间消息</div>
+            <div class="section-head">
+              <div class="panel-title">房间消息</div>
+              <span class="subtle">${state.room.messages.length} 条</span>
+            </div>
             ${state.room.messages.length ? `
               <div class="message-list">
                 ${state.room.messages.map((item) => `
@@ -554,7 +708,7 @@ const renderRoom = async () => {
                 `).join('')}
               </div>` : '<div class="empty">还没有消息记录。</div>'}
             ${room.status === 'active' ? `
-              <div class="btn-row" style="margin-top:16px">
+              <div class="btn-row input-action-row" style="margin-top:16px">
                 <input id="message-input" class="field" placeholder="说点什么，房间内所有人都能看到" />
                 <button class="btn-secondary" id="send-message">发送</button>
               </div>` : ''}
@@ -568,6 +722,7 @@ const renderRoom = async () => {
   app.querySelector('#copy-link').addEventListener('click', async () => {
     try {
       await navigator.clipboard.writeText(shareLink);
+      tapFeedback();
       toast('链接已复制');
     } catch (error) {
       toast('复制失败');
@@ -578,6 +733,7 @@ const renderRoom = async () => {
     node.addEventListener('click', async () => {
       const userId = node.dataset.playerId;
       if (userId === currentUserId) return;
+      tapFeedback();
       state.room.selectedTargetId = userId;
       renderRoom();
     });
@@ -587,7 +743,22 @@ const renderRoom = async () => {
     node.addEventListener('click', async (event) => {
       event.stopPropagation();
       const currentName = state.room.players.find((item) => item.userId === currentUserId)?.name || '';
-      const next = window.prompt('请输入当前房间里的昵称', currentName);
+      const result = await showSheet({
+        title: '修改房间昵称',
+        description: '这个昵称只影响当前房间内的显示。',
+        confirmText: '保存昵称',
+        fields: [
+          {
+            name: 'name',
+            label: '房间昵称',
+            value: currentName,
+            placeholder: '请输入当前房间里的昵称',
+            autocomplete: 'nickname',
+            maxLength: 20
+          }
+        ]
+      });
+      const next = result?.name?.trim();
       if (!next) return;
       try {
         await api('/api/room/player-name', { method: 'POST', body: { roomId, name: next } });
@@ -608,6 +779,7 @@ const renderRoom = async () => {
           return;
         }
         try {
+          tapFeedback();
           await api('/api/score/update', {
             method: 'POST',
             body: {
@@ -637,6 +809,7 @@ const renderRoom = async () => {
         return;
       }
       try {
+        tapFeedback();
         await api('/api/score/update', {
           method: 'POST',
           body: {
@@ -669,6 +842,7 @@ const renderRoom = async () => {
   }
 
   app.querySelector('#revoke-score')?.addEventListener('click', async () => {
+    tapFeedback();
     try {
       await api('/api/score/revoke', { method: 'POST', body: { roomId } });
       state.socket?.emit('score-updated', { roomId });
@@ -680,7 +854,12 @@ const renderRoom = async () => {
   });
 
   app.querySelector('#settle-room')?.addEventListener('click', async () => {
-    if (!window.confirm('结束后会生成结算并写入历史，确认继续吗？')) return;
+    const confirmed = await confirmSheet({
+      title: '结束对局',
+      description: '结束后会生成本局结算，并同步写入每位玩家的历史记录。',
+      confirmText: '确认结束'
+    });
+    if (!confirmed) return;
     try {
       const data = await api('/api/room/settle', { method: 'POST', body: { roomId } });
       state.socket?.emit('room-settled', { roomId, rankings: data.rankings });
@@ -692,7 +871,14 @@ const renderRoom = async () => {
   });
 
   app.querySelector('#exit-room').addEventListener('click', async () => {
-    const confirmed = window.confirm(isCreator ? '关闭后当前房间将不能继续记分，确认关闭并退出吗？' : '确认退出当前房间吗？');
+    const confirmed = await confirmSheet({
+      title: isCreator ? '关闭并退出房间' : '退出当前房间',
+      description: isCreator
+        ? '关闭后这个房间将不能继续记分，其他玩家也会结束当前牌局。'
+        : '退出后你可以通过链接或房间号重新加入。',
+      confirmText: isCreator ? '确认关闭' : '确认退出',
+      danger: isCreator
+    });
     if (!confirmed) return;
     try {
       if (isCreator) {
