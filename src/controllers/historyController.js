@@ -1,111 +1,132 @@
 const History = require('../models/History');
+const ScoreHistory = require('../models/ScoreHistory');
 
-// 获取历史记录
+const sendError = (res, error, fallbackMessage) => {
+  const status = error.statusCode || 500;
+  res.status(status).json({
+    code: status,
+    message: error.message || fallbackMessage
+  });
+};
+
 exports.getHistoryList = async (req, res) => {
   try {
     const { limit = 20, offset = 0 } = req.query;
     const { uid } = req.user;
-    
-    // 获取历史记录
+
     const history = await History.find({ userId: uid })
-      .sort({ createdAt: -1 })
-      .skip(parseInt(offset))
-      .limit(parseInt(limit));
-    
+      .sort({ settledAt: -1, createdAt: -1 })
+      .skip(Number(offset))
+      .limit(Number(limit));
+
     res.json({
       code: 200,
       data: history.map(item => ({
+        roomId: item.roomId,
+        roomTitle: item.roomTitle,
+        playerName: item.playerName,
+        playerAvatar: item.playerAvatar,
         time: item.time,
         result: item.result,
         score: item.score,
-        opponents: item.opponents
+        opponents: item.opponents,
+        rank: item.rank,
+        playerCount: item.playerCount,
+        scoreChanges: item.scoreChanges,
+        settledAt: item.settledAt
       })),
       message: '获取成功'
     });
   } catch (error) {
-    res.status(500).json({
-      code: 500,
-      message: '获取失败'
-    });
+    sendError(res, error, '获取历史记录失败');
   }
 };
 
-// 添加历史记录
-exports.addHistory = async (req, res) => {
+exports.getHistoryDetail = async (req, res) => {
   try {
-    const { time, result, score, opponents } = req.body;
-    const { uid } = req.user;
-    
-    // 验证结果类型
-    if (!['win', 'lose', 'draw'].includes(result)) {
+    const { roomId } = req.query;
+    if (!roomId) {
       return res.status(400).json({
         code: 400,
-        message: '结果类型无效'
+        message: '缺少房间号'
       });
     }
-    
-    // 创建历史记录
-    const history = new History({
-      userId: uid,
-      time,
-      result,
-      score,
-      opponents
-    });
-    await history.save();
-    
+
+    const { uid } = req.user;
+    const current = await History.findOne({ userId: uid, roomId });
+    if (!current) {
+      return res.status(404).json({
+        code: 404,
+        message: '未找到该对局历史'
+      });
+    }
+
+    const [records, scoreLogs] = await Promise.all([
+      History.find({ roomId }).sort({ rank: 1, score: -1 }),
+      ScoreHistory.find({ roomId }).sort({ timestamp: -1 })
+    ]);
+
     res.json({
       code: 200,
       data: {
-        historyId: history._id
+        roomId,
+        roomTitle: current.roomTitle,
+        settledAt: current.settledAt,
+        rankings: records.map(item => ({
+          userId: item.userId,
+          name: item.playerName,
+          avatar: item.playerAvatar,
+          score: item.score,
+          rank: item.rank,
+          result: item.result
+        })),
+        scoreLogs: scoreLogs.map(item => ({
+          id: item._id,
+          fromUserId: item.fromUserId,
+          toUserId: item.toUserId,
+          operatorUserId: item.operatorUserId,
+          score: item.score,
+          fromUserScoreAfter: item.fromUserScoreAfter,
+          toUserScoreAfter: item.toUserScoreAfter,
+          isRevoked: item.isRevoked,
+          revokedAt: item.revokedAt,
+          timestamp: item.timestamp
+        }))
       },
-      message: '添加成功'
+      message: '获取成功'
     });
   } catch (error) {
-    res.status(500).json({
-      code: 500,
-      message: '添加失败'
-    });
+    sendError(res, error, '获取历史详情失败');
   }
 };
 
-// 清空历史记录
 exports.clearHistory = async (req, res) => {
   try {
     const { uid } = req.user;
-    
-    // 删除用户的所有历史记录
     await History.deleteMany({ userId: uid });
-    
+
     res.json({
       code: 200,
       data: {},
       message: '历史记录已清空'
     });
   } catch (error) {
-    res.status(500).json({
-      code: 500,
-      message: '清空失败'
-    });
+    sendError(res, error, '清空历史失败');
   }
 };
 
-// 获取统计数据
 exports.getStats = async (req, res) => {
   try {
     const { uid } = req.user;
-    
-    // 获取所有历史记录
     const history = await History.find({ userId: uid });
-    
-    // 计算统计数据
+
     const totalGames = history.length;
     const winGames = history.filter(item => item.result === 'win').length;
     const winRate = totalGames > 0 ? Math.round((winGames / totalGames) * 100) : 0;
     const totalScore = history.reduce((sum, item) => sum + item.score, 0);
-    const averageScore = totalGames > 0 ? parseFloat((totalScore / totalGames).toFixed(1)) : 0;
-    const bestScore = history.length > 0 ? Math.max(...history.map(item => item.score)) : 0;
-    
+    const averageScore = totalGames > 0 ? Number((totalScore / totalGames).toFixed(1)) : 0;
+    const bestScore = totalGames > 0 ? Math.max(...history.map(item => item.score)) : 0;
+
     res.json({
       code: 200,
       data: {
@@ -119,9 +140,6 @@ exports.getStats = async (req, res) => {
       message: '获取成功'
     });
   } catch (error) {
-    res.status(500).json({
-      code: 500,
-      message: '获取失败'
-    });
+    sendError(res, error, '获取统计数据失败');
   }
 };

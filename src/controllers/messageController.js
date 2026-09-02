@@ -1,4 +1,5 @@
 const Message = require('../models/Message');
+const User = require('../models/User');
 
 // 发送消息
 exports.sendMessage = async (req, res) => {
@@ -23,11 +24,16 @@ exports.sendMessage = async (req, res) => {
     });
     await message.save();
     
+    const user = await User.findOne({ uid });
+
     res.json({
       code: 200,
       data: {
         messageId: message._id,
+        userId: message.userId,
+        userName: user?.nickName || '玩家',
         content: message.content,
+        type: message.type,
         timestamp: message.timestamp
       },
       message: '消息发送成功'
@@ -51,11 +57,15 @@ exports.getMessageHistory = async (req, res) => {
       .skip(parseInt(offset))
       .limit(parseInt(limit));
     
+    const users = await User.find({ uid: { $in: messages.map(item => item.userId) } });
+    const userMap = new Map(users.map(item => [item.uid, item.nickName]));
+
     res.json({
       code: 200,
       data: messages.map(msg => ({
         messageId: msg._id,
         userId: msg.userId,
+        userName: userMap.get(msg.userId) || '玩家',
         content: msg.content,
         type: msg.type,
         timestamp: msg.timestamp

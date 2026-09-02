@@ -6,6 +6,23 @@ const HistorySchema = new mongoose.Schema({
     required: true,
     index: true
   },
+  roomId: {
+    type: String,
+    required: true,
+    index: true
+  },
+  roomTitle: {
+    type: String,
+    default: '好友牌局'
+  },
+  playerName: {
+    type: String,
+    required: true
+  },
+  playerAvatar: {
+    type: String,
+    default: ''
+  },
   time: {
     type: String,
     required: true
@@ -22,6 +39,22 @@ const HistorySchema = new mongoose.Schema({
   opponents: {
     type: [String],
     required: true
+  },
+  rank: {
+    type: Number,
+    required: true
+  },
+  playerCount: {
+    type: Number,
+    required: true
+  },
+  scoreChanges: {
+    type: Number,
+    default: 0
+  },
+  settledAt: {
+    type: Date,
+    default: Date.now
   },
   createdAt: {
     type: Date,

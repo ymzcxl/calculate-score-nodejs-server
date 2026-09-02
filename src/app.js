@@ -3,7 +3,9 @@ const mongoose = require('mongoose');
 const cors = require('cors');
 const dotenv = require('dotenv');
 const http = require('http');
+const path = require('path');
 const { Server } = require('socket.io');
+const { migrateUserIndexes } = require('./utils/userIndexMigration');
 
 // 加载环境变量
 dotenv.config();
@@ -29,8 +31,14 @@ mongoose.connect(process.env.MONGODB_URI, {
   useUnifiedTopology: true,
   keepAlive: true,
   keepAliveInitialDelay: 300000
-}).then(() => {
+}).then(async () => {
   console.log('MongoDB连接成功');
+  try {
+    await migrateUserIndexes();
+    console.log('用户索引检查完成');
+  } catch (error) {
+    console.error('用户索引检查失败:', error);
+  }
 }).catch(err => {
   console.error('MongoDB连接失败:', err);
 });
@@ -63,6 +71,17 @@ app.use('/api/score', scoreRoutes);
 app.use('/api/message', messageRoutes);
 app.use('/api/history', historyRoutes);
 
+const publicDir = path.join(__dirname, 'public');
+app.use(express.static(publicDir));
+app.get('*', (req, res, next) => {
+  if (req.path.startsWith('/api/')) {
+    next();
+    return;
+  }
+
+  res.sendFile(path.join(publicDir, 'index.html'));
+});
+
 // Socket.io事件处理
 io.on('connection', (socket) => {
   console.log('新客户端连接:', socket.id);
@@ -83,14 +102,19 @@ io.on('connection', (socket) => {
   
   // 分数更新
   socket.on('score-updated', (data) => {
-    const { roomId, fromUserId, toUserId, score } = data;
+    const { roomId } = data;
     io.to(roomId).emit('score-updated', data);
   });
   
   // 新消息
   socket.on('new-message', (data) => {
-    const { roomId, message } = data;
-    io.to(roomId).emit('new-message', message);
+    const { roomId } = data;
+    io.to(roomId).emit('new-message', data);
+  });
+
+  socket.on('room-settled', (data) => {
+    const { roomId } = data;
+    io.to(roomId).emit('room-settled', data);
   });
   
   // 断开连接

@@ -1,125 +1,184 @@
-const Room = require('../models/Room');
-const Player = require('../models/Player');
-const User = require('../models/User');
 const crypto = require('crypto');
+const History = require('../models/History');
+const Player = require('../models/Player');
+const Room = require('../models/Room');
+const ScoreHistory = require('../models/ScoreHistory');
+const User = require('../models/User');
 
-// 生成房间号
-const generateRoomId = () => {
-  return 'room_' + crypto.randomBytes(6).toString('hex');
+const generateRoomId = () => crypto.randomBytes(3).toString('hex').toUpperCase();
+
+const mapPlayer = (player) => ({
+  userId: player.userId,
+  name: player.name,
+  avatar: player.avatar || '',
+  score: player.score,
+  joinedAt: player.joinedAt
+});
+
+const getPlayers = async (roomId) => {
+  const players = await Player.find({ roomId }).sort({ joinedAt: 1, _id: 1 });
+  return players.map(mapPlayer);
 };
 
-// 创建房间
+const buildRoomPayload = async (room) => ({
+  roomId: room.roomId,
+  title: room.title,
+  creator: room.creator,
+  status: room.status,
+  createdAt: room.createdAt,
+  settledAt: room.settledAt,
+  players: await getPlayers(room.roomId)
+});
+
+const sendError = (res, error, fallbackMessage) => {
+  const status = error.statusCode || 500;
+  res.status(status).json({
+    code: status,
+    message: error.message || fallbackMessage
+  });
+};
+
 exports.createRoom = async (req, res) => {
   try {
     const { uid } = req.user;
-    
-    // 生成房间号
+    const { title } = req.body;
     const roomId = generateRoomId();
-    
-    // 创建房间
-    const room = new Room({
+
+    const user = await User.findOne({ uid });
+    if (!user) {
+      return res.status(404).json({
+        code: 404,
+        message: '用户不存在'
+      });
+    }
+
+    const room = await Room.create({
       roomId,
       creator: uid,
+      title: title || `${user.nickName}的牌局`,
       status: 'active'
     });
-    await room.save();
-    
-    // 获取用户信息
-    const user = await User.findOne({ uid });
-    
-    // 创建玩家记录
-    const player = new Player({
+
+    await Player.create({
       roomId,
       userId: uid,
       name: user.nickName,
-      avatar: user.avatarUrl,
+      avatar: user.avatarUrl || '',
       score: 0
     });
-    await player.save();
-    
+
     res.json({
       code: 200,
-      data: {
-        roomId,
-        creator: uid
-      },
+      data: await buildRoomPayload(room),
       message: '房间创建成功'
     });
   } catch (error) {
-    res.status(500).json({
-      code: 500,
-      message: '房间创建失败'
-    });
+    sendError(res, error, '房间创建失败');
   }
 };
 
-// 加入房间
 exports.joinRoom = async (req, res) => {
   try {
     const { roomId } = req.body;
     const { uid } = req.user;
-    
-    // 检查房间是否存在
+
     const room = await Room.findOne({ roomId, status: 'active' });
     if (!room) {
       return res.status(404).json({
         code: 404,
-        message: '房间不存在或已关闭'
+        message: '房间不存在或已结束'
       });
     }
-    
-    // 检查用户是否已在房间中
-    const existingPlayer = await Player.findOne({ roomId, userId: uid });
-    if (existingPlayer) {
-      return res.status(400).json({
-        code: 400,
-        message: '您已在该房间中'
-      });
-    }
-    
-    // 获取用户信息
+
     const user = await User.findOne({ uid });
-    
-    // 创建玩家记录
-    const player = new Player({
-      roomId,
-      userId: uid,
-      name: user.nickName,
-      avatar: user.avatarUrl,
-      score: 0
-    });
-    await player.save();
-    
-    // 获取房间内所有玩家
-    const players = await Player.find({ roomId });
-    
+    if (!user) {
+      return res.status(404).json({
+        code: 404,
+        message: '用户不存在'
+      });
+    }
+
+    const existingPlayer = await Player.findOne({ roomId, userId: uid });
+    if (!existingPlayer) {
+      await Player.create({
+        roomId,
+        userId: uid,
+        name: user.nickName,
+        avatar: user.avatarUrl || '',
+        score: 0
+      });
+    }
+
     res.json({
       code: 200,
-      data: {
-        roomId,
-        players: players.map(p => ({
-          userId: p.userId,
-          name: p.name,
-          avatar: p.avatar,
-          score: p.score
-        }))
-      },
+      data: await buildRoomPayload(room),
       message: '加入房间成功'
     });
   } catch (error) {
-    res.status(500).json({
-      code: 500,
-      message: '加入房间失败'
-    });
+    sendError(res, error, '加入房间失败');
   }
 };
 
-// 获取房间信息
 exports.getRoomInfo = async (req, res) => {
   try {
     const { roomId } = req.query;
-    
-    // 检查房间是否存在
+    const room = await Room.findOne({ roomId });
+
+    if (!room) {
+      return res.status(404).json({
+        code: 404,
+        message: '房间不存在'
+      });
+    }
+
+    res.json({
+      code: 200,
+      data: await buildRoomPayload(room),
+      message: '获取成功'
+    });
+  } catch (error) {
+    sendError(res, error, '获取房间信息失败');
+  }
+};
+
+exports.updatePlayerName = async (req, res) => {
+  try {
+    const { roomId, name } = req.body;
+    const { uid } = req.user;
+
+    if (!roomId || !name || !name.trim()) {
+      return res.status(400).json({
+        code: 400,
+        message: '请输入玩家名称'
+      });
+    }
+
+    const player = await Player.findOne({ roomId, userId: uid });
+    if (!player) {
+      return res.status(404).json({
+        code: 404,
+        message: '玩家不在当前房间中'
+      });
+    }
+
+    player.name = name.trim();
+    await player.save();
+
+    res.json({
+      code: 200,
+      data: mapPlayer(player),
+      message: '名称更新成功'
+    });
+  } catch (error) {
+    sendError(res, error, '更新名称失败');
+  }
+};
+
+exports.settleRoom = async (req, res) => {
+  try {
+    const { roomId } = req.body;
+    const { uid } = req.user;
+
     const room = await Room.findOne({ roomId });
     if (!room) {
       return res.status(404).json({
@@ -127,94 +186,145 @@ exports.getRoomInfo = async (req, res) => {
         message: '房间不存在'
       });
     }
-    
-    // 获取房间内所有玩家
-    const players = await Player.find({ roomId });
-    
+
+    if (room.creator !== uid) {
+      return res.status(403).json({
+        code: 403,
+        message: '只有房主可以结束对局'
+      });
+    }
+
+    if (room.status !== 'active') {
+      return res.status(400).json({
+        code: 400,
+        message: '对局已结束'
+      });
+    }
+
+    const players = await Player.find({ roomId }).sort({ score: -1, joinedAt: 1 });
+    if (!players.length) {
+      return res.status(400).json({
+        code: 400,
+        message: '房间内没有玩家'
+      });
+    }
+
+    const scoreLogs = await ScoreHistory.find({ roomId, isRevoked: false });
+    const settledAt = new Date();
+    const timeText = settledAt.toLocaleString('zh-CN', { hour12: false });
+
+    await History.deleteMany({ roomId });
+
+    const historyDocs = players.map((player, index) => {
+      const opponents = players
+        .filter(item => item.userId !== player.userId)
+        .map(item => item.name);
+
+      const topScore = players[0].score;
+      const result = player.score === topScore
+        ? 'win'
+        : player.score === 0
+          ? 'draw'
+          : 'lose';
+
+      return {
+        userId: player.userId,
+        roomId,
+        roomTitle: room.title,
+        playerName: player.name,
+        playerAvatar: player.avatar || '',
+        time: timeText,
+        result,
+        score: player.score,
+        opponents,
+        rank: index + 1,
+        playerCount: players.length,
+        scoreChanges: scoreLogs.filter(log =>
+          log.fromUserId === player.userId || log.toUserId === player.userId
+        ).length,
+        settledAt
+      };
+    });
+
+    await History.insertMany(historyDocs);
+
+    room.status = 'closed';
+    room.settledAt = settledAt;
+    room.closedAt = settledAt;
+    await room.save();
+
     res.json({
       code: 200,
       data: {
-        roomId: room.roomId,
-        creator: room.creator,
-        status: room.status,
-        players: players.map(p => ({
-          userId: p.userId,
-          name: p.name,
-          avatar: p.avatar,
-          score: p.score
+        roomId,
+        settledAt,
+        rankings: players.map((player, index) => ({
+          rank: index + 1,
+          userId: player.userId,
+          name: player.name,
+          avatar: player.avatar || '',
+          score: player.score
         }))
       },
-      message: '获取成功'
+      message: '对局已结束'
     });
   } catch (error) {
-    res.status(500).json({
-      code: 500,
-      message: '获取失败'
-    });
+    sendError(res, error, '结束对局失败');
   }
 };
 
-// 关闭房间
 exports.closeRoom = async (req, res) => {
   try {
     const { roomId } = req.body;
     const { uid } = req.user;
-    
-    // 检查房间是否存在
     const room = await Room.findOne({ roomId });
+
     if (!room) {
       return res.status(404).json({
         code: 404,
         message: '房间不存在'
       });
     }
-    
-    // 检查是否是房间创建者
+
     if (room.creator !== uid) {
       return res.status(403).json({
         code: 403,
-        message: '只有房间创建者可以关闭房间'
+        message: '只有房主可以关闭房间'
       });
     }
-    
-    // 关闭房间
+
     room.status = 'closed';
+    room.closedAt = new Date();
     await room.save();
-    
+
     res.json({
       code: 200,
       data: {
         roomId,
-        status: 'closed'
+        status: room.status
       },
       message: '房间已关闭'
     });
   } catch (error) {
-    res.status(500).json({
-      code: 500,
-      message: '关闭房间失败'
-    });
+    sendError(res, error, '关闭房间失败');
   }
 };
 
-// 退出房间
 exports.exitRoom = async (req, res) => {
   try {
     const { roomId } = req.body;
     const { uid } = req.user;
-    
-    // 检查玩家是否在房间中
     const player = await Player.findOne({ roomId, userId: uid });
+
     if (!player) {
       return res.status(400).json({
         code: 400,
         message: '您不在该房间中'
       });
     }
-    
-    // 删除玩家记录
-    await player.remove();
-    
+
+    await player.deleteOne();
+
     res.json({
       code: 200,
       data: {
@@ -223,9 +333,6 @@ exports.exitRoom = async (req, res) => {
       message: '已退出房间'
     });
   } catch (error) {
-    res.status(500).json({
-      code: 500,
-      message: '退出房间失败'
-    });
+    sendError(res, error, '退出房间失败');
   }
 };

@@ -20,6 +20,28 @@ const ScoreHistorySchema = new mongoose.Schema({
     type: Number,
     required: true
   },
+  operatorUserId: {
+    type: String,
+    required: true,
+    index: true
+  },
+  fromUserScoreAfter: {
+    type: Number,
+    required: true
+  },
+  toUserScoreAfter: {
+    type: Number,
+    required: true
+  },
+  isRevoked: {
+    type: Boolean,
+    default: false,
+    index: true
+  },
+  revokedAt: {
+    type: Date,
+    default: null
+  },
   timestamp: {
     type: Date,
     default: Date.now

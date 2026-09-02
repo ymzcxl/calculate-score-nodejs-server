@@ -19,6 +19,18 @@ const RoomSchema = new mongoose.Schema({
     default: 'active',
     index: true
   },
+  title: {
+    type: String,
+    default: '好友牌局'
+  },
+  settledAt: {
+    type: Date,
+    default: null
+  },
+  closedAt: {
+    type: Date,
+    default: null
+  },
   createdAt: {
     type: Date,
     default: Date.now
