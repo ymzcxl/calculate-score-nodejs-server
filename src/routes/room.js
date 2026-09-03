@@ -24,4 +24,6 @@ router.post('/close', auth, roomController.closeRoom);
 // 退出房间
 router.post('/exit', auth, roomController.exitRoom);
 
+router.post('/takeover', auth, roomController.takeoverSeat);
+
 module.exports = router;

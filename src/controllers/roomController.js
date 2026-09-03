@@ -336,3 +336,88 @@ exports.exitRoom = async (req, res) => {
     sendError(res, error, '退出房间失败');
   }
 };
+
+// 替补接管分数
+exports.takeoverSeat = async (req, res) => {
+  try {
+    const { roomId, targetUserId } = req.body;
+    const currentUserId = req.user.uid;
+
+    if (currentUserId === targetUserId) {
+      return res.status(400).json({ code: 400, message: '不能接管自己' });
+    }
+
+    const room = await Room.findOne({ roomId, status: 'active' });
+    if (!room) {
+      return res.status(404).json({ code: 404, message: '房间不存在或已结束' });
+    }
+
+    // 获取当前用户
+    const currentUser = await User.findOne({ uid: currentUserId });
+    if (!currentUser) {
+      return res.status(404).json({ code: 404, message: '用户不存在' });
+    }
+
+    // 查找双方玩家记录
+    const targetPlayer = await Player.findOne({ roomId, userId: targetUserId });
+    let currentPlayer = await Player.findOne({ roomId, userId: currentUserId });
+
+    if (!targetPlayer) {
+      return res.status(404).json({ code: 404, message: '目标玩家不在该房间内' });
+    }
+
+    // 如果当前用户不在房间里，先创建一个0分的记录
+    if (!currentPlayer) {
+      currentPlayer = new Player({
+        roomId,
+        userId: currentUserId,
+        name: currentUser.nickName,
+        avatar: currentUser.avatarUrl,
+        score: 0
+      });
+    }
+
+    // 转移分数
+    currentPlayer.score += targetPlayer.score;
+    await currentPlayer.save();
+
+    // 转移记分历史中的身份 (把历史记录里的 targetUserId 全部替换为 currentUserId)
+    await ScoreHistory.updateMany(
+      { roomId, fromUserId: targetUserId },
+      { $set: { fromUserId: currentUserId } }
+    );
+    await ScoreHistory.updateMany(
+      { roomId, toUserId: targetUserId },
+      { $set: { toUserId: currentUserId } }
+    );
+
+    // 房主接管处理：如果被接管的是房主，则把房主转让给当前用户
+    if (room.creator === targetUserId) {
+      room.creator = currentUserId;
+      await room.save();
+    }
+
+    // 删除被接管玩家
+    await Player.deleteOne({ _id: targetPlayer._id });
+
+    // 通知全房间更新
+    const io = req.app.get('io');
+    if (io) {
+      io.to(roomId).emit('player-updated', {
+        roomId,
+        message: `${currentUser.nickName} 接管了 ${targetPlayer.name} 的位置和分数！`
+      });
+    }
+
+    res.json({
+      code: 200,
+      message: '接管成功'
+    });
+
+  } catch (error) {
+    console.error('Takeover Error:', error);
+    res.status(500).json({ code: 500, message: '接管失败' });
+  }
+};
+
+

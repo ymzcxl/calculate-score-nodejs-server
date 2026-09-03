@@ -1,4 +1,6 @@
 const User = require('../models/User');
+const Room = require('../models/Room');
+const Player = require('../models/Player');
 
 // 获取用户信息
 exports.getUserInfo = async (req, res) => {
@@ -11,13 +13,28 @@ exports.getUserInfo = async (req, res) => {
       });
     }
     
+    // 查找用户当前正在进行的活跃房间
+    const activePlayer = await Player.findOne({ userId: user.uid }).sort({ joinedAt: -1 });
+    let activeRoomId = null;
+    let activeRoomIsCreator = false;
+    
+    if (activePlayer) {
+      const room = await Room.findOne({ roomId: activePlayer.roomId, status: 'active' });
+      if (room) {
+        activeRoomId = room.roomId;
+        activeRoomIsCreator = (room.creator === user.uid);
+      }
+    }
+    
     res.json({
       code: 200,
       data: {
         uid: user.uid,
         nickName: user.nickName,
         avatarUrl: user.avatarUrl,
-        phone: user.phone
+        phone: user.phone,
+        activeRoomId: activeRoomId, // 返回当前活跃房间号
+        activeRoomIsCreator: activeRoomIsCreator // 是否是该活跃房间的房主
       },
       message: '获取成功'
     });

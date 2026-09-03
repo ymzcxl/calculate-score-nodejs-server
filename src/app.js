@@ -3,7 +3,6 @@ const mongoose = require('mongoose');
 const cors = require('cors');
 const dotenv = require('dotenv');
 const http = require('http');
-const path = require('path');
 const { Server } = require('socket.io');
 const { migrateUserIndexes } = require('./utils/userIndexMigration');
 
@@ -12,16 +11,35 @@ dotenv.config();
 
 // 初始化Express应用
 const app = express();
+
+const parseCorsOrigins = () => {
+  const rawOrigins = (process.env.CORS_ORIGIN || '').trim();
+  if (!rawOrigins || rawOrigins === '*') {
+    return '*';
+  }
+
+  return rawOrigins
+    .split(',')
+    .map(item => item.trim())
+    .filter(Boolean);
+};
+
+const corsOrigins = parseCorsOrigins();
+const allowCredentials = corsOrigins !== '*';
 const server = http.createServer(app);
 const io = new Server(server, {
   cors: {
-    origin: '*',
-    methods: ['GET', 'POST']
+    origin: corsOrigins,
+    methods: ['GET', 'POST'],
+    credentials: allowCredentials
   }
 });
 
 // 中间件
-app.use(cors());
+app.use(cors({
+  origin: corsOrigins,
+  credentials: allowCredentials
+}));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
@@ -71,15 +89,27 @@ app.use('/api/score', scoreRoutes);
 app.use('/api/message', messageRoutes);
 app.use('/api/history', historyRoutes);
 
-const publicDir = path.join(__dirname, 'public');
-app.use(express.static(publicDir));
-app.get('*', (req, res, next) => {
-  if (req.path.startsWith('/api/')) {
-    next();
-    return;
-  }
+app.get('/', (req, res) => {
+  res.json({
+    code: 200,
+    message: 'scoring backend service is running',
+    data: {
+      service: 'scoring-backend',
+      frontend: 'separated',
+      apiBase: '/api'
+    }
+  });
+});
 
-  res.sendFile(path.join(publicDir, 'index.html'));
+app.get('/health', (req, res) => {
+  res.json({
+    code: 200,
+    message: 'ok',
+    data: {
+      status: 'healthy',
+      database: mongoose.connection.readyState
+    }
+  });
 });
 
 // Socket.io事件处理
