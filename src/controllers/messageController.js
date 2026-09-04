@@ -2,6 +2,45 @@ const Message = require('../models/Message');
 const Player = require('../models/Player');
 const Room = require('../models/Room');
 
+const mapMessage = (message, userName = '玩家', extra = {}) => ({
+  messageId: message._id,
+  userId: message.userId,
+  userName,
+  content: message.content,
+  targetUserId: message.targetUserId || '',
+  targetScope: message.targetUserId ? 'player' : 'room',
+  type: message.type,
+  timestamp: message.timestamp,
+  ...extra
+});
+
+const emitRoomEvent = (req, eventName, payload) => {
+  const io = req.app.get('io');
+  if (!io || !payload?.roomId) {
+    return;
+  }
+
+  io.to(payload.roomId).emit(eventName, payload);
+};
+
+const getActiveRoomAndSender = async (roomId, uid) => {
+  const room = await Room.findOne({ roomId, status: 'active' });
+  if (!room) {
+    const error = new Error('房间不存在或已结束');
+    error.statusCode = 404;
+    throw error;
+  }
+
+  const sender = await Player.findOne({ roomId, userId: uid });
+  if (!sender) {
+    const error = new Error('您不在当前房间中');
+    error.statusCode = 403;
+    throw error;
+  }
+
+  return { room, sender };
+};
+
 // 发送消息
 exports.sendMessage = async (req, res) => {
   try {
@@ -25,21 +64,7 @@ exports.sendMessage = async (req, res) => {
       });
     }
 
-    const room = await Room.findOne({ roomId, status: 'active' });
-    if (!room) {
-      return res.status(404).json({
-        code: 404,
-        message: '房间不存在或已结束'
-      });
-    }
-
-    const sender = await Player.findOne({ roomId, userId: uid });
-    if (!sender) {
-      return res.status(403).json({
-        code: 403,
-        message: '您不在当前房间中'
-      });
-    }
+    const { sender } = await getActiveRoomAndSender(roomId, uid);
 
     if (normalizedTargetUserId && normalizedTargetUserId !== uid) {
       const targetPlayer = await Player.findOne({ roomId, userId: normalizedTargetUserId });
@@ -63,22 +88,81 @@ exports.sendMessage = async (req, res) => {
 
     res.json({
       code: 200,
-      data: {
-        messageId: message._id,
-        userId: message.userId,
-        userName: sender.name || '玩家',
-        content: message.content,
-        targetUserId: message.targetUserId || '',
-        targetScope: message.targetUserId ? 'player' : 'room',
-        type: message.type,
-        timestamp: message.timestamp
-      },
+      data: mapMessage(message, sender.name || '玩家'),
       message: '消息发送成功'
     });
   } catch (error) {
-    res.status(500).json({
-      code: 500,
-      message: '消息发送失败'
+    res.status(error.statusCode || 500).json({
+      code: error.statusCode || 500,
+      message: error.message || '消息发送失败'
+    });
+  }
+};
+
+exports.sendLeaderboardNotice = async (req, res) => {
+  try {
+    const { roomId } = req.body;
+    const { uid } = req.user;
+
+    if (!roomId) {
+      return res.status(400).json({
+        code: 400,
+        message: '缺少房间号'
+      });
+    }
+
+    const { sender } = await getActiveRoomAndSender(roomId, uid);
+    const players = await Player.find({ roomId }).sort({ score: -1, joinedAt: 1, _id: 1 });
+
+    if (!players.length) {
+      return res.status(400).json({
+        code: 400,
+        message: '当前房间暂无玩家'
+      });
+    }
+
+    const leaderScore = players[0].score;
+    const leaders = players
+      .filter((player) => player.score === leaderScore)
+      .map((player) => ({
+        userId: player.userId,
+        name: player.name,
+        avatar: player.avatar || '',
+        score: player.score
+      }));
+
+    const leaderNames = leaders.map((player) => player.name).join('、');
+    const content = leaders.length > 1
+      ? `提醒大家关注当前并列领先者：${leaderNames}（${leaderScore > 0 ? `+${leaderScore}` : leaderScore}）`
+      : `提醒大家关注当前领先者：${leaderNames}（${leaderScore > 0 ? `+${leaderScore}` : leaderScore}）`;
+
+    const message = await Message.create({
+      roomId,
+      userId: uid,
+      content,
+      targetUserId: '',
+      type: 'system'
+    });
+
+    const payload = mapMessage(message, sender.name || '玩家', {
+      noticeType: 'leaderboard',
+      initiatorUserId: uid,
+      leaders,
+      leaderScore
+    });
+
+    emitRoomEvent(req, 'leaderboard-notice', payload);
+    emitRoomEvent(req, 'new-message', payload);
+
+    res.json({
+      code: 200,
+      data: payload,
+      message: '排行榜通知已发送'
+    });
+  } catch (error) {
+    res.status(error.statusCode || 500).json({
+      code: error.statusCode || 500,
+      message: error.message || '发送排行榜通知失败'
     });
   }
 };
@@ -99,16 +183,7 @@ exports.getMessageHistory = async (req, res) => {
 
     res.json({
       code: 200,
-      data: messages.map(msg => ({
-        messageId: msg._id,
-        userId: msg.userId,
-        userName: playerMap.get(msg.userId) || '玩家',
-        content: msg.content,
-        targetUserId: msg.targetUserId || '',
-        targetScope: msg.targetUserId ? 'player' : 'room',
-        type: msg.type,
-        timestamp: msg.timestamp
-      })),
+      data: messages.map(msg => mapMessage(msg, playerMap.get(msg.userId) || '玩家')),
       message: '获取成功'
     });
   } catch (error) {

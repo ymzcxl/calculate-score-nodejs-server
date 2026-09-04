@@ -20,15 +20,45 @@ const getPlayers = async (roomId) => {
   return players.map(mapPlayer);
 };
 
-const buildRoomPayload = async (room) => ({
-  roomId: room.roomId,
-  title: room.title,
-  creator: room.creator,
-  status: room.status,
-  createdAt: room.createdAt,
-  settledAt: room.settledAt,
-  players: await getPlayers(room.roomId)
-});
+const getLeader = (players) => {
+  if (!players.length) {
+    return null;
+  }
+
+  const leader = [...players].sort((a, b) => {
+    if (b.score !== a.score) {
+      return b.score - a.score;
+    }
+
+    return new Date(a.joinedAt).getTime() - new Date(b.joinedAt).getTime();
+  })[0];
+
+  return {
+    userId: leader.userId,
+    name: leader.name,
+    avatar: leader.avatar || '',
+    score: leader.score
+  };
+};
+
+const buildRoomPayload = async (room) => {
+  const players = await getPlayers(room.roomId);
+  const creatorPlayer = players.find((player) => player.userId === room.creator);
+
+  return {
+    roomId: room.roomId,
+    title: room.title,
+    creator: room.creator,
+    creatorName: creatorPlayer?.name || '',
+    status: room.status,
+    createdAt: room.createdAt,
+    settledAt: room.settledAt,
+    closedAt: room.closedAt,
+    playerCount: players.length,
+    leader: getLeader(players),
+    players
+  };
+};
 
 const sendError = (res, error, fallbackMessage) => {
   const status = error.statusCode || 500;

@@ -152,6 +152,10 @@ io.on('connection', (socket) => {
     broadcastToRoom('new-message', data);
   });
 
+  socket.on('leaderboard-notice', (data) => {
+    broadcastToRoom('leaderboard-notice', data);
+  });
+
   socket.on('room-settled', (data) => {
     broadcastToRoom('room-settled', data);
   });
@@ -162,6 +166,14 @@ io.on('connection', (socket) => {
 
   socket.on('player-updated', (data) => {
     broadcastToRoom('player-updated', data);
+  });
+
+  socket.on('score-revoke-requested', (data) => {
+    broadcastToRoom('score-revoke-requested', data);
+  });
+
+  socket.on('score-revoked', (data) => {
+    broadcastToRoom('score-revoked', data);
   });
 
   socket.on('interaction', (data = {}) => {

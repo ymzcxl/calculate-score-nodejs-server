@@ -6,6 +6,9 @@ const auth = require('../middleware/auth');
 // 发送消息
 router.post('/send', auth, messageController.sendMessage);
 
+// 发送排行榜通知
+router.post('/leaderboard-notice', auth, messageController.sendLeaderboardNotice);
+
 // 获取消息记录
 router.get('/history', auth, messageController.getMessageHistory);
 

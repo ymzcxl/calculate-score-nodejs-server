@@ -43,6 +43,33 @@ const mapHistoryItem = (item) => ({
   timestamp: item.timestamp
 });
 
+const mapPlayerScore = (player) => ({
+  userId: player.userId,
+  name: player.name,
+  avatar: player.avatar || '',
+  score: player.score
+});
+
+const emitRoomEvent = (req, eventName, payload) => {
+  const io = req.app.get('io');
+  if (!io || !payload?.roomId) {
+    return;
+  }
+
+  io.to(payload.roomId).emit(eventName, payload);
+};
+
+const buildRevokePayload = (history, fromPlayer, toPlayer, action, status) => ({
+  roomId: history.roomId,
+  action,
+  status,
+  requesterUserId: history.revokeRequestedBy || history.fromUserId,
+  approverUserId: history.toUserId,
+  history: mapHistoryItem(history),
+  fromUser: mapPlayerScore(fromPlayer),
+  toUser: mapPlayerScore(toPlayer)
+});
+
 const sendError = (res, error, fallbackMessage) => {
   const status = error.statusCode || 500;
   res.status(status).json({
@@ -123,8 +150,9 @@ exports.updateScore = async (req, res) => {
 
 exports.revokeLastScore = async (req, res) => {
   try {
-    const { roomId } = req.body;
+    const { roomId, action: rawAction = '' } = req.body;
     const { uid } = req.user;
+    const action = ['request', 'approve'].includes(rawAction) ? rawAction : '';
     if (!roomId) {
       return res.status(400).json({
         code: 400,
@@ -169,8 +197,30 @@ exports.revokeLastScore = async (req, res) => {
     }
 
     const io = req.app.get('io');
+    if (history.revokeRequestStatus === 'pending') {
+      if (uid === history.revokeRequestedBy) {
+        return res.status(409).json({
+          code: 409,
+          message: `撤回申请已发出，等待 ${toPlayer.name} 确认`,
+          data: buildRevokePayload(history, fromPlayer, toPlayer, 'request', 'pending')
+        });
+      }
 
-    if (history.revokeRequestStatus === 'pending' && uid === history.toUserId && uid !== history.revokeRequestedBy) {
+      if (uid !== history.toUserId) {
+        return res.status(403).json({
+          code: 403,
+          message: '只有被记分方可以确认撤回'
+        });
+      }
+
+      if (action === 'request') {
+        return res.status(409).json({
+          code: 409,
+          message: '当前撤回申请正在等待确认，请执行确认操作',
+          data: buildRevokePayload(history, fromPlayer, toPlayer, 'request', 'pending')
+        });
+      }
+
       fromPlayer.score += history.score;
       toPlayer.score -= history.score;
       history.isRevoked = true;
@@ -179,69 +229,38 @@ exports.revokeLastScore = async (req, res) => {
 
       await Promise.all([fromPlayer.save(), toPlayer.save(), history.save()]);
 
-      if (io) {
-        io.to(roomId).emit('player-updated', {
-          roomId,
-          message: `${toPlayer.name} 已同意撤回上一笔记分`
-        });
-      }
+      const payload = buildRevokePayload(history, fromPlayer, toPlayer, 'approve', 'approved');
+      payload.message = `${toPlayer.name} 已确认撤回上一笔记分`;
+
+      emitRoomEvent(req, 'score-revoked', payload);
+      emitRoomEvent(req, 'score-updated', {
+        roomId,
+        reason: 'revoke-approved',
+        historyId: history._id
+      });
+      emitRoomEvent(req, 'player-updated', {
+        roomId,
+        message: payload.message
+      });
 
       return res.json({
         code: 200,
-        data: {
-          status: 'approved',
-          history: mapHistoryItem(history),
-          fromUser: {
-            userId: fromPlayer.userId,
-            score: fromPlayer.score
-          },
-          toUser: {
-            userId: toPlayer.userId,
-            score: toPlayer.score
-          }
-        },
+        data: payload,
         message: '已撤回上一笔记分'
       });
     }
 
-    if (history.revokeRequestStatus === 'pending') {
+    if (action === 'approve') {
       return res.status(409).json({
         code: 409,
-        message: '上一笔记分已经在等待确认'
+        message: '当前没有待确认的撤回申请'
       });
     }
 
     if (uid !== history.fromUserId) {
-      fromPlayer.score += history.score;
-      toPlayer.score -= history.score;
-      history.isRevoked = true;
-      history.revokedAt = new Date();
-      history.revokeRequestStatus = 'approved';
-
-      await Promise.all([fromPlayer.save(), toPlayer.save(), history.save()]);
-
-      if (io) {
-        io.to(roomId).emit('player-updated', {
-          roomId,
-          message: `${toPlayer.name} 直接确认撤回了上一笔记分`
-        });
-      }
-
-      return res.json({
-        code: 200,
-        data: {
-          status: 'approved',
-          history: mapHistoryItem(history),
-          fromUser: {
-            userId: fromPlayer.userId,
-            score: fromPlayer.score
-          },
-          toUser: {
-            userId: toPlayer.userId,
-            score: toPlayer.score
-          }
-        },
-        message: '已撤回上一笔记分'
+      return res.status(403).json({
+        code: 403,
+        message: '只有发起记分的一方可以申请撤回'
       });
     }
 
@@ -250,20 +269,21 @@ exports.revokeLastScore = async (req, res) => {
     history.revokeRequestedAt = new Date();
     await history.save();
 
+    const payload = buildRevokePayload(history, fromPlayer, toPlayer, 'request', 'pending');
+    payload.message = `${fromPlayer.name} 发起了撤回申请，等待 ${toPlayer.name} 确认`;
+
+    emitRoomEvent(req, 'score-revoke-requested', payload);
+
     if (io) {
       io.to(roomId).emit('player-updated', {
         roomId,
-        message: `${fromPlayer.name} 发起了撤回申请，等待 ${toPlayer.name} 确认`
+        message: payload.message
       });
     }
 
     res.json({
       code: 200,
-      data: {
-        status: 'pending',
-        history: mapHistoryItem(history),
-        approverUserId: toPlayer.userId
-      },
+      data: payload,
       message: `已发起撤回申请，等待 ${toPlayer.name} 确认`
     });
   } catch (error) {
