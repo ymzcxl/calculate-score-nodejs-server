@@ -178,9 +178,8 @@ exports.logout = async (req, res) => {
 
 exports.resetPassword = async (req, res) => {
   try {
-    const { phone, nickName, newPassword, confirmPassword } = req.body;
+    const { phone, newPassword, confirmPassword } = req.body;
     validatePhone(phone);
-    validateNickname(nickName, '昵称');
     validatePassword(newPassword, confirmPassword);
 
     const user = await User.findOne({ phone });
@@ -188,13 +187,6 @@ exports.resetPassword = async (req, res) => {
       return res.status(400).json({
         code: 400,
         message: '账号不存在'
-      });
-    }
-
-    if ((user.nickName || '').trim() !== nickName.trim()) {
-      return res.status(400).json({
-        code: 400,
-        message: '手机号与昵称不匹配'
       });
     }
 
