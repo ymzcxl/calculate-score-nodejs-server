@@ -38,6 +38,21 @@ const ScoreHistorySchema = new mongoose.Schema({
     default: false,
     index: true
   },
+  revokeRequestStatus: {
+    type: String,
+    enum: ['none', 'pending', 'approved'],
+    default: 'none',
+    index: true
+  },
+  revokeRequestedBy: {
+    type: String,
+    default: '',
+    index: true
+  },
+  revokeRequestedAt: {
+    type: Date,
+    default: null
+  },
   revokedAt: {
     type: Date,
     default: null

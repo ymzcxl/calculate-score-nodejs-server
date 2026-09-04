@@ -36,6 +36,9 @@ const mapHistoryItem = (item) => ({
   fromUserScoreAfter: item.fromUserScoreAfter,
   toUserScoreAfter: item.toUserScoreAfter,
   isRevoked: item.isRevoked,
+  revokeRequestStatus: item.revokeRequestStatus || 'none',
+  revokeRequestedBy: item.revokeRequestedBy || '',
+  revokeRequestedAt: item.revokeRequestedAt,
   revokedAt: item.revokedAt,
   timestamp: item.timestamp
 });
@@ -57,6 +60,13 @@ exports.updateScore = async (req, res) => {
       return res.status(400).json({
         code: 400,
         message: '缺少必要参数'
+      });
+    }
+
+    if (req.user.uid !== fromUserId) {
+      return res.status(403).json({
+        code: 403,
+        message: '只能操作自己的记分'
       });
     }
 
@@ -114,6 +124,7 @@ exports.updateScore = async (req, res) => {
 exports.revokeLastScore = async (req, res) => {
   try {
     const { roomId } = req.body;
+    const { uid } = req.user;
     if (!roomId) {
       return res.status(400).json({
         code: 400,
@@ -149,27 +160,111 @@ exports.revokeLastScore = async (req, res) => {
       });
     }
 
-    fromPlayer.score += history.score;
-    toPlayer.score -= history.score;
-    history.isRevoked = true;
-    history.revokedAt = new Date();
+    const participants = [history.fromUserId, history.toUserId];
+    if (!participants.includes(uid)) {
+      return res.status(403).json({
+        code: 403,
+        message: '只有本笔记分相关人员可以处理撤回'
+      });
+    }
 
-    await Promise.all([fromPlayer.save(), toPlayer.save(), history.save()]);
+    const io = req.app.get('io');
+
+    if (history.revokeRequestStatus === 'pending' && uid === history.toUserId && uid !== history.revokeRequestedBy) {
+      fromPlayer.score += history.score;
+      toPlayer.score -= history.score;
+      history.isRevoked = true;
+      history.revokedAt = new Date();
+      history.revokeRequestStatus = 'approved';
+
+      await Promise.all([fromPlayer.save(), toPlayer.save(), history.save()]);
+
+      if (io) {
+        io.to(roomId).emit('player-updated', {
+          roomId,
+          message: `${toPlayer.name} 已同意撤回上一笔记分`
+        });
+      }
+
+      return res.json({
+        code: 200,
+        data: {
+          status: 'approved',
+          history: mapHistoryItem(history),
+          fromUser: {
+            userId: fromPlayer.userId,
+            score: fromPlayer.score
+          },
+          toUser: {
+            userId: toPlayer.userId,
+            score: toPlayer.score
+          }
+        },
+        message: '已撤回上一笔记分'
+      });
+    }
+
+    if (history.revokeRequestStatus === 'pending') {
+      return res.status(409).json({
+        code: 409,
+        message: '上一笔记分已经在等待确认'
+      });
+    }
+
+    if (uid !== history.fromUserId) {
+      fromPlayer.score += history.score;
+      toPlayer.score -= history.score;
+      history.isRevoked = true;
+      history.revokedAt = new Date();
+      history.revokeRequestStatus = 'approved';
+
+      await Promise.all([fromPlayer.save(), toPlayer.save(), history.save()]);
+
+      if (io) {
+        io.to(roomId).emit('player-updated', {
+          roomId,
+          message: `${toPlayer.name} 直接确认撤回了上一笔记分`
+        });
+      }
+
+      return res.json({
+        code: 200,
+        data: {
+          status: 'approved',
+          history: mapHistoryItem(history),
+          fromUser: {
+            userId: fromPlayer.userId,
+            score: fromPlayer.score
+          },
+          toUser: {
+            userId: toPlayer.userId,
+            score: toPlayer.score
+          }
+        },
+        message: '已撤回上一笔记分'
+      });
+    }
+
+    history.revokeRequestStatus = 'pending';
+    history.revokeRequestedBy = uid;
+    history.revokeRequestedAt = new Date();
+    await history.save();
+
+    if (io) {
+      io.to(roomId).emit('player-updated', {
+        roomId,
+        message: `${fromPlayer.name} 发起了撤回申请，等待 ${toPlayer.name} 确认`
+      });
+    }
 
     res.json({
       code: 200,
       data: {
+        status: 'pending',
         history: mapHistoryItem(history),
-        fromUser: {
-          userId: fromPlayer.userId,
-          score: fromPlayer.score
-        },
-        toUser: {
-          userId: toPlayer.userId,
-          score: toPlayer.score
-        }
+        approverUserId: toPlayer.userId
       },
-      message: '已撤回上一笔记分'
+      message: `已发起撤回申请，等待 ${toPlayer.name} 确认`
     });
   } catch (error) {
     sendError(res, error, '撤回记分失败');

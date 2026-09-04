@@ -41,7 +41,8 @@ const sendError = (res, error, fallbackMessage) => {
 exports.createRoom = async (req, res) => {
   try {
     const { uid } = req.user;
-    const { title } = req.body;
+    const rawTitle = req.body?.title || req.body?.roomName || '';
+    const title = String(rawTitle).replace(/\s+/g, ' ').trim().slice(0, 18);
     const roomId = generateRoomId();
 
     const user = await User.findOne({ uid });
@@ -50,6 +51,21 @@ exports.createRoom = async (req, res) => {
         code: 404,
         message: '用户不存在'
       });
+    }
+
+    const activePlayer = await Player.findOne({ userId: uid }).sort({ joinedAt: -1, _id: -1 });
+    if (activePlayer) {
+      const activeRoom = await Room.findOne({ roomId: activePlayer.roomId, status: 'active' });
+      if (activeRoom) {
+        return res.status(409).json({
+          code: 409,
+          message: '您还有进行中的牌局，请先处理上一局',
+          data: {
+            activeRoomId: activeRoom.roomId,
+            activeRoomIsCreator: activeRoom.creator === uid
+          }
+        });
+      }
     }
 
     const room = await Room.create({
@@ -419,5 +435,3 @@ exports.takeoverSeat = async (req, res) => {
     res.status(500).json({ code: 500, message: '接管失败' });
   }
 };
-
-
