@@ -34,6 +34,7 @@ const io = new Server(server, {
     credentials: allowCredentials
   }
 });
+app.set('io', io);
 
 // 中间件
 app.use(cors({
@@ -115,6 +116,17 @@ app.get('/health', (req, res) => {
 // Socket.io事件处理
 io.on('connection', (socket) => {
   console.log('新客户端连接:', socket.id);
+
+  const resolveRoomId = (payload) => {
+    if (typeof payload === 'string') return payload;
+    return payload?.roomId || '';
+  };
+
+  const broadcastToRoom = (eventName, payload) => {
+    const roomId = resolveRoomId(payload);
+    if (!roomId) return;
+    io.to(roomId).emit(eventName, payload);
+  };
   
   // 加入房间
   socket.on('join-room', (roomId) => {
@@ -132,19 +144,41 @@ io.on('connection', (socket) => {
   
   // 分数更新
   socket.on('score-updated', (data) => {
-    const { roomId } = data;
-    io.to(roomId).emit('score-updated', data);
+    broadcastToRoom('score-updated', data);
   });
   
   // 新消息
   socket.on('new-message', (data) => {
-    const { roomId } = data;
-    io.to(roomId).emit('new-message', data);
+    broadcastToRoom('new-message', data);
   });
 
   socket.on('room-settled', (data) => {
-    const { roomId } = data;
-    io.to(roomId).emit('room-settled', data);
+    broadcastToRoom('room-settled', data);
+  });
+
+  socket.on('room-closed', (data) => {
+    broadcastToRoom('room-closed', data);
+  });
+
+  socket.on('player-updated', (data) => {
+    broadcastToRoom('player-updated', data);
+  });
+
+  socket.on('interaction', (data = {}) => {
+    const roomId = resolveRoomId(data);
+    if (!roomId || !data.fromUserId || !data.emoji) return;
+
+    const payload = {
+      roomId,
+      interactionId: data.interactionId || `${Date.now()}_${socket.id}`,
+      fromUserId: data.fromUserId,
+      toUserId: data.toUserId || '',
+      emoji: data.emoji,
+      name: data.name || '',
+      timestamp: data.timestamp || new Date().toISOString()
+    };
+
+    io.to(roomId).emit('room-interaction', payload);
   });
   
   // 断开连接
