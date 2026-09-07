@@ -4,6 +4,7 @@ const Room = require('../models/Room');
 
 const mapMessage = (message, userName = '玩家', extra = {}) => ({
   messageId: message._id,
+  roomId: message.roomId,
   userId: message.userId,
   userName,
   content: message.content,
