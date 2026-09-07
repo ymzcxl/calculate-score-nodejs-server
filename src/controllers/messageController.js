@@ -8,8 +8,8 @@ const mapMessage = (message, userName = '玩家', extra = {}) => ({
   userId: message.userId,
   userName,
   content: message.content,
-  targetUserId: message.targetUserId || '',
-  targetScope: message.targetUserId ? 'player' : 'room',
+  targetUserId: '',
+  targetScope: 'room',
   type: message.type,
   timestamp: message.timestamp,
   ...extra
@@ -155,10 +155,9 @@ const pickLeaderboardNoticeContent = ({ leaders, leaderScore, runnerUpScore }) =
 // 发送消息
 exports.sendMessage = async (req, res) => {
   try {
-    const { roomId, content, type, targetUserId = '' } = req.body;
+    const { roomId, content, type } = req.body;
     const { uid } = req.user;
     const trimmedContent = String(content || '').trim();
-    const normalizedTargetUserId = String(targetUserId || '').trim();
 
     if (!roomId || !trimmedContent) {
       return res.status(400).json({
@@ -176,23 +175,13 @@ exports.sendMessage = async (req, res) => {
     }
 
     const { sender } = await getActiveRoomAndSender(roomId, uid);
-
-    if (normalizedTargetUserId && normalizedTargetUserId !== uid) {
-      const targetPlayer = await Player.findOne({ roomId, userId: normalizedTargetUserId });
-      if (!targetPlayer) {
-        return res.status(404).json({
-          code: 404,
-          message: '目标玩家不存在'
-        });
-      }
-    }
     
     // 创建消息
     const message = new Message({
       roomId,
       userId: uid,
       content: trimmedContent,
-      targetUserId: normalizedTargetUserId,
+      targetUserId: '',
       type
     });
     await message.save();
